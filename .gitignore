@@ -5,3 +5,4 @@
 bin/
 .crates.toml
 **/paramcache
+.idea/
