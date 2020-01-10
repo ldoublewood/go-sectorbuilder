@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	sectorbuilder "github.com/filecoin-project/filecoin-ffi"
 	"github.com/filecoin-project/go-address"
@@ -50,6 +51,9 @@ type WorkerCfg struct {
 	NoCommit    bool
 
 	// TODO: 'cost' info, probably in terms of sealing + transfer speed
+
+	Directory string
+	IPAddress string
 }
 
 type SectorBuilder struct {
@@ -68,7 +72,6 @@ type SectorBuilder struct {
 	rateLimit   chan struct{}
 
 	precommitTasks chan workerCall
-	commitTasks    chan workerCall
 
 	taskCtr       uint64
 	remoteLk      sync.Mutex
@@ -119,6 +122,11 @@ type remote struct {
 
 	sealTasks chan<- WorkerTask
 	busy      uint64 // only for metrics
+
+	dir string
+
+	lastPreCommitSectorID uint64
+	commitTask chan workerCall
 }
 
 type Config struct {
@@ -178,7 +186,6 @@ func New(cfg *Config, ds datastore.Batching) (*SectorBuilder, error) {
 
 		taskCtr:        1,
 		precommitTasks: make(chan workerCall),
-		commitTasks:    make(chan workerCall),
 		remoteResults:  map[uint64]chan<- SealRes{},
 		remotes:        map[int]*remote{},
 
@@ -574,7 +581,7 @@ func (sb *SectorBuilder) sealCommitLocal(sectorID uint64, ticket SealTicket, see
 	return proof, nil
 }
 
-func (sb *SectorBuilder) SealCommit(ctx context.Context, sectorID uint64, ticket SealTicket, seed SealSeed, pieces []PublicPieceInfo, rspco RawSealPreCommitOutput) (proof []byte, err error) {
+func (sb *SectorBuilder) SealCommit(ctx context.Context, sectorID uint64, ticket SealTicket, seed SealSeed, pieces []PublicPieceInfo, rspco RawSealPreCommitOutput) (proof []byte, workerDir string, err error) {
 	call := workerCall{
 		task: WorkerTask{
 			Type:       WorkerCommit,
@@ -592,7 +599,7 @@ func (sb *SectorBuilder) SealCommit(ctx context.Context, sectorID uint64, ticket
 	atomic.AddInt32(&sb.commitWait, 1)
 
 	select { // prefer remote
-	case sb.commitTasks <- call:
+	case sb.putCommitTask(call) <- call:
 		proof, err = sb.sealCommitRemote(call)
 	default:
 		sb.checkRateLimit()
@@ -603,19 +610,21 @@ func (sb *SectorBuilder) SealCommit(ctx context.Context, sectorID uint64, ticket
 		}
 
 		select { // use whichever is available
-		case sb.commitTasks <- call:
+		case sb.putCommitTask(call) <- call:
 			proof, err = sb.sealCommitRemote(call)
 		case rl <- struct{}{}:
 			proof, err = sb.sealCommitLocal(sectorID, ticket, seed, pieces, rspco)
 		case <-ctx.Done():
 			return nil, ctx.Err()
+		case <-time.After(time.Second): // TODO: ugly
+			err = xerrors.New("no worker is waiting for this committing task")
 		}
 	}
 	if err != nil {
-		return nil, xerrors.Errorf("commit: %w", err)
+		return nil, "", xerrors.Errorf("commit: %w", err)
 	}
 
-	return proof, nil
+	return proof, call.workerDir, nil
 }
 
 func (sb *SectorBuilder) ComputeElectionPoSt(sectorInfo SortedPublicSectorInfo, challengeSeed []byte, winners []EPostCandidate) ([]byte, error) {
@@ -659,7 +668,7 @@ func (sb *SectorBuilder) pubSectorToPriv(sectorInfo SortedPublicSectorInfo, faul
 			continue
 		}
 
-		cachePath, err := sb.sectorCacheDir(s.SectorID)
+		cachePath, err := sb.sectorCacheDirForworker(s.WorkerDir, s.SectorID)
 		if err != nil {
 			return SortedPrivateSectorInfo{}, xerrors.Errorf("getting cache path for sector %d: %w", s.SectorID, err)
 		}

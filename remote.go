@@ -2,6 +2,9 @@ package sectorbuilder
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 
 	"golang.org/x/xerrors"
 )
@@ -31,16 +34,34 @@ type WorkerTask struct {
 type workerCall struct {
 	task WorkerTask
 	ret  chan SealRes
+	workerDir string
 }
 
 func (sb *SectorBuilder) AddWorker(ctx context.Context, cfg WorkerCfg) (<-chan WorkerTask, error) {
 	sb.remoteLk.Lock()
 	defer sb.remoteLk.Unlock()
 
+	workerDir := filepath.Join(sb.filesystem.path, "workers", cfg.IPAddress)
+	err := os.MkdirAll(workerDir, 0777)
+	if err != nil {
+		return nil, err
+	}
+	umountCmd := exec.CommandContext(ctx, "umount", "-f", workerDir)
+	umountRes, err := umountCmd.Output()
+	log.Infof("Executed umount worker directory: %s, err: %s", umountRes, err)
+	// You should install `sshfs`
+	mountCmd := exec.CommandContext(ctx, "sshfs", cfg.IPAddress+":"+cfg.Directory, workerDir)
+	mountRes, err := mountCmd.Output()
+	if err != nil {
+		log.Errorf("Executed sshfs mount worker directory: %s, err: %s", mountRes, err)
+		return nil, err
+	}
+
 	taskCh := make(chan WorkerTask)
 	r := &remote{
 		sealTasks: taskCh,
 		busy:      0,
+		dir: 	   workerDir,
 	}
 
 	sb.remoteCtr++
@@ -57,7 +78,7 @@ func (sb *SectorBuilder) returnTask(task workerCall) {
 	case WorkerPreCommit:
 		ret = sb.precommitTasks
 	case WorkerCommit:
-		ret = sb.commitTasks
+		log.Error("discard committing task", task.task.SectorID)
 	default:
 		log.Error("unknown task type", task.task.Type)
 	}
@@ -86,20 +107,17 @@ func (sb *SectorBuilder) remoteWorker(ctx context.Context, r *remote, cfg Worker
 		}
 	}()
 
-	precommits := sb.precommitTasks
-	if cfg.NoPreCommit {
-		precommits = nil
-	}
-	commits := sb.commitTasks
-	if cfg.NoCommit {
-		commits = nil
+	getTask := func() chan workerCall {
+		if r.lastPreCommitSectorID > 0 {
+			return r.commitTask
+		} else {
+			return sb.precommitTasks
+		}
 	}
 
 	for {
 		select {
-		case task := <-commits:
-			sb.doTask(ctx, r, task)
-		case task := <-precommits:
+		case task := <-getTask():
 			sb.doTask(ctx, r, task)
 		case <-ctx.Done():
 			return
@@ -139,6 +157,15 @@ func (sb *SectorBuilder) doTask(ctx context.Context, r *remote, task workerCall)
 		// send the result back to the caller
 		select {
 		case task.ret <- res:
+			sb.remoteLk.Lock()
+			if task.task.Type == WorkerPreCommit {
+				r.lastPreCommitSectorID = task.task.SectorID
+				r.commitTask = make(chan workerCall)
+			} else {
+				r.lastPreCommitSectorID = 0
+				r.commitTask = nil
+			}
+			sb.remoteLk.Unlock()
 		case <-ctx.Done():
 			return
 		case <-sb.stopping:
@@ -171,4 +198,17 @@ func (sb *SectorBuilder) TaskDone(ctx context.Context, task uint64, res SealRes)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (sb *SectorBuilder) putCommitTask(call workerCall) chan workerCall {
+	sb.remoteLk.Lock()
+	defer sb.remoteLk.Unlock()
+
+	for _, r := range sb.remotes {
+		if r.lastPreCommitSectorID == call.task.SectorID {
+			call.workerDir = r.dir
+			return r.commitTask
+		}
+	}
+	return make(chan workerCall) // will never succeed to send to
 }
