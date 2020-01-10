@@ -30,8 +30,8 @@ const CommLen = ffi.CommitmentBytesLen
 type WorkerCfg struct {
 	NoPreCommit bool
 	NoCommit    bool
-
-	// TODO: 'cost' info, probably in terms of sealing + transfer speed
+	Directory string
+	IPAddress string
 }
 
 type SectorBuilder struct {
@@ -74,6 +74,12 @@ type remote struct {
 
 	sealTasks chan<- WorkerTask
 	busy      uint64 // only for metrics
+
+	dir string
+
+	lastPreCommitSectorID uint64
+	commitTask chan workerCall
+
 }
 
 type JsonRSPCO struct {

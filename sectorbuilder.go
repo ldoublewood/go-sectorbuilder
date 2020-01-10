@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync/atomic"
-
 	ffi "github.com/filecoin-project/filecoin-ffi"
 	"github.com/filecoin-project/go-address"
 	datastore "github.com/ipfs/go-datastore"
@@ -22,7 +21,79 @@ const PoRepProofPartitions = 10
 var lastSectorIdKey = datastore.NewKey("/last")
 
 var log = logging.Logger("sectorbuilder")
+/*
+<<<<<<< HEAD
+=======
+type SortedPublicSectorInfo = sectorbuilder.SortedPublicSectorInfo
+type SortedPrivateSectorInfo = sectorbuilder.SortedPrivateSectorInfo
 
+type SealTicket = sectorbuilder.SealTicket
+
+type SealSeed = sectorbuilder.SealSeed
+
+type SealPreCommitOutput = sectorbuilder.SealPreCommitOutput
+
+type SealCommitOutput = sectorbuilder.SealCommitOutput
+
+type PublicPieceInfo = sectorbuilder.PublicPieceInfo
+
+type RawSealPreCommitOutput sectorbuilder.RawSealPreCommitOutput
+
+type EPostCandidate = sectorbuilder.Candidate
+
+const CommLen = sectorbuilder.CommitmentBytesLen
+
+type WorkerCfg struct {
+	NoPreCommit bool
+	NoCommit    bool
+
+	// TODO: 'cost' info, probably in terms of sealing + transfer speed
+
+	Directory string
+	IPAddress string
+}
+
+type SectorBuilder struct {
+	ds   datastore.Batching
+	idLk sync.Mutex
+
+	ssize  uint64
+	lastID uint64
+
+	Miner address.Address
+
+	unsealLk sync.Mutex
+
+	noCommit    bool
+	noPreCommit bool
+	rateLimit   chan struct{}
+
+	precommitTasks chan workerCall
+
+	taskCtr       uint64
+	remoteLk      sync.Mutex
+	remoteCtr     int
+	remotes       map[int]*remote
+	remoteResults map[uint64]chan<- SealRes
+
+	addPieceWait  int32
+	preCommitWait int32
+	commitWait    int32
+	unsealWait    int32
+
+	fsLk       sync.Mutex //nolint: struckcheck
+	filesystem *fs        // TODO: multi-fs support
+
+	stopping chan struct{}
+}
+
+type JsonRSPCO struct {
+	CommD []byte
+	CommR []byte
+}
+
+>>>>>>> Add enhanced worker mode
+*/
 func (rspco *RawSealPreCommitOutput) ToJson() JsonRSPCO {
 	return JsonRSPCO{
 		CommD: rspco.CommD[:],
@@ -36,7 +107,31 @@ func (rspco *JsonRSPCO) rspco() RawSealPreCommitOutput {
 	copy(out.CommR[:], rspco.CommR)
 	return out
 }
+/*
+<<<<<<< HEAD
+=======
+type SealRes struct {
+	Err   string
+	GoErr error `json:"-"`
 
+	Proof []byte
+	Rspco JsonRSPCO
+}
+
+type remote struct {
+	lk sync.Mutex
+
+	sealTasks chan<- WorkerTask
+	busy      uint64 // only for metrics
+
+	dir string
+
+	lastPreCommitSectorID uint64
+	commitTask chan workerCall
+}
+
+>>>>>>> Add enhanced worker mode
+*/
 type Config struct {
 	SectorSize uint64
 	Miner      address.Address
@@ -94,7 +189,6 @@ func New(cfg *Config, ds datastore.Batching) (*SectorBuilder, error) {
 
 		taskCtr:        1,
 		precommitTasks: make(chan workerCall),
-		commitTasks:    make(chan workerCall),
 		remoteResults:  map[uint64]chan<- SealRes{},
 		remotes:        map[int]*remote{},
 
@@ -234,6 +328,119 @@ func (sb *SectorBuilder) sealCommitRemote(call workerCall) (proof []byte, err er
 	}
 }
 
+/*
+<<<<<<< HEAD
+=======
+func (sb *SectorBuilder) sealCommitLocal(sectorID uint64, ticket SealTicket, seed SealSeed, pieces []PublicPieceInfo, rspco RawSealPreCommitOutput) (proof []byte, err error) {
+	atomic.AddInt32(&sb.commitWait, -1)
+
+	defer func() {
+		<-sb.rateLimit
+	}()
+
+	cacheDir, err := sb.sectorCacheDir(sectorID)
+	if err != nil {
+		return nil, err
+	}
+
+	proof, err = sectorbuilder.SealCommit(
+		sb.ssize,
+		PoRepProofPartitions,
+		cacheDir,
+		sectorID,
+		addressToProverID(sb.Miner),
+		ticket.TicketBytes,
+		seed.TicketBytes,
+		pieces,
+		sectorbuilder.RawSealPreCommitOutput(rspco),
+	)
+	if err != nil {
+		log.Warn("StandaloneSealCommit error: ", err)
+		log.Warnf("sid:%d tkt:%v seed:%v, ppi:%v rspco:%v", sectorID, ticket, seed, pieces, rspco)
+
+		return nil, xerrors.Errorf("StandaloneSealCommit: %w", err)
+	}
+
+	return proof, nil
+}
+
+func (sb *SectorBuilder) SealCommit(ctx context.Context, sectorID uint64, ticket SealTicket, seed SealSeed, pieces []PublicPieceInfo, rspco RawSealPreCommitOutput) (proof []byte, workerDir string, err error) {
+	call := workerCall{
+		task: WorkerTask{
+			Type:       WorkerCommit,
+			TaskID:     atomic.AddUint64(&sb.taskCtr, 1),
+			SectorID:   sectorID,
+			SealTicket: ticket,
+			Pieces:     pieces,
+
+			SealSeed: seed,
+			Rspco:    rspco,
+		},
+		ret: make(chan SealRes),
+	}
+
+	atomic.AddInt32(&sb.commitWait, 1)
+
+	select { // prefer remote
+	case sb.putCommitTask(call) <- call:
+		proof, err = sb.sealCommitRemote(call)
+	default:
+		sb.checkRateLimit()
+
+		rl := sb.rateLimit
+		if sb.noCommit {
+			rl = make(chan struct{})
+		}
+
+		select { // use whichever is available
+		case sb.putCommitTask(call) <- call:
+			proof, err = sb.sealCommitRemote(call)
+		case rl <- struct{}{}:
+			proof, err = sb.sealCommitLocal(sectorID, ticket, seed, pieces, rspco)
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Second): // TODO: ugly
+			err = xerrors.New("no worker is waiting for this committing task")
+		}
+	}
+	if err != nil {
+		return nil, "", xerrors.Errorf("commit: %w", err)
+	}
+
+	return proof, call.workerDir, nil
+}
+
+func (sb *SectorBuilder) ComputeElectionPoSt(sectorInfo SortedPublicSectorInfo, challengeSeed []byte, winners []EPostCandidate) ([]byte, error) {
+	if len(challengeSeed) != CommLen {
+		return nil, xerrors.Errorf("given challenge seed was the wrong length: %d != %d", len(challengeSeed), CommLen)
+	}
+	var cseed [CommLen]byte
+	copy(cseed[:], challengeSeed)
+
+	privsects, err := sb.pubSectorToPriv(sectorInfo, nil) // TODO: faults
+	if err != nil {
+		return nil, err
+	}
+
+	proverID := addressToProverID(sb.Miner)
+
+	return sectorbuilder.GeneratePoSt(sb.ssize, proverID, privsects, cseed, winners)
+}
+
+func (sb *SectorBuilder) GenerateEPostCandidates(sectorInfo SortedPublicSectorInfo, challengeSeed [CommLen]byte, faults []uint64) ([]EPostCandidate, error) {
+	privsectors, err := sb.pubSectorToPriv(sectorInfo, faults)
+	if err != nil {
+		return nil, err
+	}
+
+	challengeCount := ElectionPostChallengeCount(uint64(len(sectorInfo.Values())), uint64(len(faults)))
+
+	proverID := addressToProverID(sb.Miner)
+	return sectorbuilder.GenerateCandidates(sb.ssize, proverID, challengeSeed, challengeCount, privsectors)
+}
+
+>>>>>>> Add enhanced worker mode
+*/
 func (sb *SectorBuilder) pubSectorToPriv(sectorInfo SortedPublicSectorInfo, faults []uint64) (SortedPrivateSectorInfo, error) {
 	fmap := map[uint64]struct{}{}
 	for _, fault := range faults {
@@ -246,7 +453,7 @@ func (sb *SectorBuilder) pubSectorToPriv(sectorInfo SortedPublicSectorInfo, faul
 			continue
 		}
 
-		cachePath, err := sb.sectorCacheDir(s.SectorID)
+		cachePath, err := sb.sectorCacheDirForworker(s.WorkerDir, s.SectorID)
 		if err != nil {
 			return SortedPrivateSectorInfo{}, xerrors.Errorf("getting cache path for sector %d: %w", s.SectorID, err)
 		}

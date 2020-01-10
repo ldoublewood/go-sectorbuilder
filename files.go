@@ -45,6 +45,17 @@ func (sb *SectorBuilder) sectorCacheDir(sectorID uint64) (string, error) {
 	return dir, err
 }
 
+func (sb *SectorBuilder) sectorCacheDirForworker(workerDir string, sectorID uint64) (string, error) {
+	dir := filepath.Join(workerDir, string(dataCache), sb.SectorName(sectorID))
+
+	err := os.Mkdir(dir, 0755)
+	if os.IsExist(err) {
+		err = nil
+	}
+
+	return dir, err
+}
+
 func (sb *SectorBuilder) GetPath(typ string, sectorName string) (string, error) {
 	_, found := overheadMul[dataType(typ)]
 	if !found {
