@@ -20,6 +20,14 @@ func (sb *SectorBuilder) StagedSectorPath(sectorID uint64) string {
 	return filepath.Join(sb.filesystem.pathFor(dataStaging), sb.SectorName(sectorID))
 }
 
+func (sb *SectorBuilder) stagedSectorPathOverride(sectorID uint64) string {
+	if p, ok := os.LookupEnv("LOTUS_STAGED_SECTOR_PATH"); ok {
+		return p
+	} else {
+		return sb.StagedSectorPath(sectorID)
+	}
+}
+
 func (sb *SectorBuilder) unsealedSectorPath(sectorID uint64) string {
 	return filepath.Join(sb.filesystem.pathFor(dataUnsealed), sb.SectorName(sectorID))
 }
