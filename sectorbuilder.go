@@ -21,79 +21,7 @@ const PoRepProofPartitions = 10
 var lastSectorIdKey = datastore.NewKey("/last")
 
 var log = logging.Logger("sectorbuilder")
-/*
-<<<<<<< HEAD
-=======
-type SortedPublicSectorInfo = sectorbuilder.SortedPublicSectorInfo
-type SortedPrivateSectorInfo = sectorbuilder.SortedPrivateSectorInfo
 
-type SealTicket = sectorbuilder.SealTicket
-
-type SealSeed = sectorbuilder.SealSeed
-
-type SealPreCommitOutput = sectorbuilder.SealPreCommitOutput
-
-type SealCommitOutput = sectorbuilder.SealCommitOutput
-
-type PublicPieceInfo = sectorbuilder.PublicPieceInfo
-
-type RawSealPreCommitOutput sectorbuilder.RawSealPreCommitOutput
-
-type EPostCandidate = sectorbuilder.Candidate
-
-const CommLen = sectorbuilder.CommitmentBytesLen
-
-type WorkerCfg struct {
-	NoPreCommit bool
-	NoCommit    bool
-
-	// TODO: 'cost' info, probably in terms of sealing + transfer speed
-
-	Directory string
-	IPAddress string
-}
-
-type SectorBuilder struct {
-	ds   datastore.Batching
-	idLk sync.Mutex
-
-	ssize  uint64
-	lastID uint64
-
-	Miner address.Address
-
-	unsealLk sync.Mutex
-
-	noCommit    bool
-	noPreCommit bool
-	rateLimit   chan struct{}
-
-	precommitTasks chan workerCall
-
-	taskCtr       uint64
-	remoteLk      sync.Mutex
-	remoteCtr     int
-	remotes       map[int]*remote
-	remoteResults map[uint64]chan<- SealRes
-
-	addPieceWait  int32
-	preCommitWait int32
-	commitWait    int32
-	unsealWait    int32
-
-	fsLk       sync.Mutex //nolint: struckcheck
-	filesystem *fs        // TODO: multi-fs support
-
-	stopping chan struct{}
-}
-
-type JsonRSPCO struct {
-	CommD []byte
-	CommR []byte
-}
-
->>>>>>> Add enhanced worker mode
-*/
 func (rspco *RawSealPreCommitOutput) ToJson() JsonRSPCO {
 	return JsonRSPCO{
 		CommD: rspco.CommD[:],
@@ -108,8 +36,6 @@ func (rspco *JsonRSPCO) rspco() RawSealPreCommitOutput {
 	return out
 }
 /*
-<<<<<<< HEAD
-=======
 type SealRes struct {
 	Err   string
 	GoErr error `json:"-"`
@@ -314,6 +240,112 @@ func (sb *SectorBuilder) sealPreCommitRemote(call workerCall) (RawSealPreCommitO
 	}
 }
 
+<<<<<<< HEAD
+=======
+func (sb *SectorBuilder) SealPreCommit(ctx context.Context, sectorID uint64, ticket SealTicket, pieces []PublicPieceInfo) (RawSealPreCommitOutput, error) {
+	fs := sb.filesystem
+
+	if err := fs.reserve(dataCache, sb.ssize); err != nil {
+		return RawSealPreCommitOutput{}, err
+	}
+	defer fs.free(dataCache, sb.ssize)
+
+	if err := fs.reserve(dataSealed, sb.ssize); err != nil {
+		return RawSealPreCommitOutput{}, err
+	}
+	defer fs.free(dataSealed, sb.ssize)
+
+	call := workerCall{
+		task: WorkerTask{
+			Type:       WorkerPreCommit,
+			TaskID:     atomic.AddUint64(&sb.taskCtr, 1),
+			SectorID:   sectorID,
+			SealTicket: ticket,
+			Pieces:     pieces,
+		},
+		ret: make(chan SealRes),
+	}
+
+	atomic.AddInt32(&sb.preCommitWait, 1)
+
+	select { // prefer remote
+	case sb.precommitTasks <- call:
+		return sb.sealPreCommitRemote(call)
+	default:
+	}
+
+	sb.checkRateLimit()
+
+	rl := sb.rateLimit
+	if sb.noPreCommit {
+		rl = make(chan struct{})
+	}
+
+	select { // use whichever is available
+	case sb.precommitTasks <- call:
+		return sb.sealPreCommitRemote(call)
+	case rl <- struct{}{}:
+	case <-ctx.Done():
+		return RawSealPreCommitOutput{}, ctx.Err()
+	}
+
+	atomic.AddInt32(&sb.preCommitWait, -1)
+
+	// local
+
+	defer func() {
+		<-sb.rateLimit
+	}()
+
+	cacheDir, err := sb.sectorCacheDir(sectorID)
+	if err != nil {
+		return RawSealPreCommitOutput{}, xerrors.Errorf("getting cache dir: %w", err)
+	}
+
+	sealedPath, err := sb.SealedSectorPath(sectorID)
+	if err != nil {
+		return RawSealPreCommitOutput{}, xerrors.Errorf("getting sealed sector path: %w", err)
+	}
+
+	e, err := os.OpenFile(sealedPath, os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		return RawSealPreCommitOutput{}, xerrors.Errorf("ensuring sealed file exists: %w", err)
+	}
+	if err := e.Close(); err != nil {
+		return RawSealPreCommitOutput{}, err
+	}
+
+	var sum uint64
+	for _, piece := range pieces {
+		sum += piece.Size
+	}
+	ussize := UserBytesForSectorSize(sb.ssize)
+	if sum != ussize {
+		return RawSealPreCommitOutput{}, xerrors.Errorf("aggregated piece sizes don't match sector size: %d != %d (%d)", sum, ussize, int64(ussize-sum))
+	}
+
+	stagedPath := sb.stagedSectorPathOverride(sectorID)
+
+	// TODO: context cancellation respect
+	rspco, err := sectorbuilder.SealPreCommit(
+		sb.ssize,
+		PoRepProofPartitions,
+		cacheDir,
+		stagedPath,
+		sealedPath,
+		sectorID,
+		addressToProverID(sb.Miner),
+		ticket.TicketBytes,
+		pieces,
+	)
+	if err != nil {
+		return RawSealPreCommitOutput{}, xerrors.Errorf("presealing sector %d (%s): %w", sectorID, stagedPath, err)
+	}
+
+	return RawSealPreCommitOutput(rspco), nil
+}
+
+>>>>>>> Add fixed staged sector path from env
 func (sb *SectorBuilder) sealCommitRemote(call workerCall) (proof []byte, err error) {
 	atomic.AddInt32(&sb.commitWait, -1)
 
