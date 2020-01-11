@@ -513,7 +513,7 @@ func (sb *SectorBuilder) SealPreCommit(ctx context.Context, sectorID uint64, tic
 		return RawSealPreCommitOutput{}, xerrors.Errorf("aggregated piece sizes don't match sector size: %d != %d (%d)", sum, ussize, int64(ussize-sum))
 	}
 
-	stagedPath := sb.StagedSectorPath(sectorID)
+	stagedPath := sb.stagedSectorPathOverride(sectorID)
 
 	// TODO: context cancellation respect
 	rspco, err := sectorbuilder.SealPreCommit(
