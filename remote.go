@@ -37,7 +37,7 @@ type workerCall struct {
 	workerDir string
 }
 
-func (sb *SectorBuilder) (ctx context.Context, cfg WorkerCfg) (<-chan WorkerTask, error) {
+func (sb *SectorBuilder) AddWorker(ctx context.Context, cfg WorkerCfg) (<-chan WorkerTask, error) {
 	sb.remoteLk.Lock()
 	defer sb.remoteLk.Unlock()
 
