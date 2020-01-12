@@ -665,11 +665,12 @@ func (sb *SectorBuilder) pubSectorToPriv(sectorInfo SortedPublicSectorInfo, faul
 
 		var cachePath string
 		var err error
-		if s.WorkerDir == "" {
-			cachePath, err = sb.sectorCacheDir(s.SectorID)
-		} else {
-			cachePath, err = sb.sectorCacheDirForworker(s.WorkerDir, s.SectorID)
-		}
+		cachePath, err = sb.sectorCacheDir(s.SectorID)
+		//if s.WorkerDir == "" {
+		//	cachePath, err = sb.sectorCacheDir(s.SectorID)
+		//} else {
+		//	cachePath, err = sb.sectorCacheDirForworker(s.WorkerDir, s.SectorID)
+		//}
 		if err != nil {
 			return SortedPrivateSectorInfo{}, xerrors.Errorf("getting cache path for sector %d: %w", s.SectorID, err)
 		}
