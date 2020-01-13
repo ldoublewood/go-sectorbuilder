@@ -32,8 +32,8 @@ type WorkerTask struct {
 }
 
 type workerCall struct {
-	task WorkerTask
-	ret  chan SealRes
+	task      WorkerTask
+	ret       chan SealRes
 	workerDir string
 }
 
@@ -42,13 +42,15 @@ func (sb *SectorBuilder) AddWorker(ctx context.Context, cfg WorkerCfg) (<-chan W
 	defer sb.remoteLk.Unlock()
 
 	workerDir := filepath.Join(sb.filesystem.path, "workers", cfg.IPAddress)
-	err := os.MkdirAll(workerDir, 0777)
-	if err != nil {
-		return nil, err
-	}
+
 	umountCmd := exec.CommandContext(ctx, "umount", "-f", workerDir)
 	umountRes, err := umountCmd.Output()
 	log.Infof("Executed umount worker directory: %s, err: %s", umountRes, err)
+
+	err = os.MkdirAll(workerDir, 0777)
+	if err != nil {
+		return nil, err
+	}
 	// You should install `sshfs`
 	mountCmd := exec.CommandContext(ctx, "sshfs", cfg.IPAddress+":"+cfg.Directory, workerDir)
 	mountRes, err := mountCmd.Output()
@@ -61,7 +63,7 @@ func (sb *SectorBuilder) AddWorker(ctx context.Context, cfg WorkerCfg) (<-chan W
 	r := &remote{
 		sealTasks: taskCh,
 		busy:      0,
-		dir: 	   workerDir,
+		dir:       workerDir,
 	}
 
 	sb.remoteCtr++
@@ -200,7 +202,7 @@ func (sb *SectorBuilder) TaskDone(ctx context.Context, task uint64, res SealRes)
 	}
 }
 
-func (sb *SectorBuilder) putCommitTask(call workerCall) chan workerCall {
+func (sb *SectorBuilder) putCommitTask(call *workerCall) chan workerCall {
 	sb.remoteLk.Lock()
 	defer sb.remoteLk.Unlock()
 
