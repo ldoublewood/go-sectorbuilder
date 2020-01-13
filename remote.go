@@ -34,7 +34,7 @@ type WorkerTask struct {
 type workerCall struct {
 	task WorkerTask
 	ret  chan SealRes
-	workerDir string
+	//workerDir string
 }
 
 func (sb *SectorBuilder) AddWorker(ctx context.Context, cfg WorkerCfg) (<-chan WorkerTask, error) {
@@ -206,7 +206,7 @@ func (sb *SectorBuilder) putCommitTask(call workerCall) chan workerCall {
 
 	for _, r := range sb.remotes {
 		if r.lastPreCommitSectorID == call.task.SectorID {
-			call.workerDir = r.dir
+			//call.workerDir = r.dir
 			return r.commitTask
 		}
 	}

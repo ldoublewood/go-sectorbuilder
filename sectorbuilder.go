@@ -578,7 +578,7 @@ func (sb *SectorBuilder) sealCommitLocal(sectorID uint64, ticket SealTicket, see
 	return proof, nil
 }
 
-func (sb *SectorBuilder) SealCommit(sectorID uint64, ticket SealTicket, seed SealSeed, pieces []PublicPieceInfo, rspco RawSealPreCommitOutput) (proof []byte, workerDir string, err error) {
+func (sb *SectorBuilder) SealCommit(sectorID uint64, ticket SealTicket, seed SealSeed, pieces []PublicPieceInfo, rspco RawSealPreCommitOutput) (proof []byte, err error) {
 	call := workerCall{
 		task: WorkerTask{
 			Type:       WorkerCommit,
@@ -616,10 +616,10 @@ func (sb *SectorBuilder) SealCommit(sectorID uint64, ticket SealTicket, seed Sea
 		}
 	}
 	if err != nil {
-		return nil, "", xerrors.Errorf("commit: %w", err)
+		return nil, xerrors.Errorf("commit: %w", err)
 	}
 
-	return proof, call.workerDir, nil
+	return proof,  nil
 }
 
 func (sb *SectorBuilder) ComputeElectionPoSt(sectorInfo SortedPublicSectorInfo, challengeSeed []byte, winners []EPostCandidate) ([]byte, error) {
