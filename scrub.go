@@ -19,7 +19,7 @@ func (sb *SectorBuilder) Scrub(sectorSet sectorbuilder.SortedPublicSectorInfo) [
 	var faults []*Fault
 
 	for _, sector := range sectorSet.Values() {
-		err := sb.checkSector(sector.SectorID)
+		err := sb.checkSector(sector.SectorID, sector.WorkerDir)
 		if err != nil {
 			faults = append(faults, &Fault{SectorID: sector.SectorID, Err: err})
 		}
@@ -28,8 +28,14 @@ func (sb *SectorBuilder) Scrub(sectorSet sectorbuilder.SortedPublicSectorInfo) [
 	return faults
 }
 
-func (sb *SectorBuilder) checkSector(sectorID uint64) error {
-	cache, err := sb.sectorCacheDir(sectorID)
+func (sb *SectorBuilder) checkSector(sectorID uint64, workerDir string) error {
+	var cache string
+	var err error
+	if workerDir == "" {
+		cache, err = sb.sectorCacheDir(sectorID)
+	} else {
+		cache, err = sb.sectorCacheDirForworker(workerDir, sectorID)
+	}
 	if err != nil {
 		return xerrors.Errorf("getting sector cache dir: %w", err)
 	}
