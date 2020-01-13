@@ -126,7 +126,7 @@ type remote struct {
 	dir string
 
 	lastPreCommitSectorID uint64
-	commitTask chan workerCall
+	commitTask            chan workerCall
 }
 
 type Config struct {
@@ -599,7 +599,7 @@ func (sb *SectorBuilder) SealCommit(ctx context.Context, sectorID uint64, ticket
 	atomic.AddInt32(&sb.commitWait, 1)
 
 	select { // prefer remote
-	case sb.putCommitTask(call) <- call:
+	case sb.putCommitTask(&call) <- call:
 		proof, err = sb.sealCommitRemote(call)
 	default:
 		sb.checkRateLimit()
@@ -610,7 +610,7 @@ func (sb *SectorBuilder) SealCommit(ctx context.Context, sectorID uint64, ticket
 		}
 
 		select { // use whichever is available
-		case sb.putCommitTask(call) <- call:
+		case sb.putCommitTask(&call) <- call:
 			proof, err = sb.sealCommitRemote(call)
 		case rl <- struct{}{}:
 			proof, err = sb.sealCommitLocal(sectorID, ticket, seed, pieces, rspco)
