@@ -60,14 +60,14 @@ func (sb *SectorBuilder) checkSector(sectorID uint64, workerDir string) error {
 		return xerrors.Errorf("found %d files in %s, expected 3", len(dent), cache)
 	}
 
-	sealed, err := sb.SealedSectorPath(sectorID)
+	/* sealed, err := sb.SealedSectorPath(sectorID)
 	if err != nil {
 		return xerrors.Errorf("getting sealed sector path: %w", err)
 	}
 
 	if err := assertFile(filepath.Join(sealed), sb.ssize, sb.ssize); err != nil {
 		return err
-	}
+	} */
 
 	return nil
 }
