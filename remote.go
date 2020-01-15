@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 
 	"golang.org/x/xerrors"
 )
@@ -43,20 +44,27 @@ func (sb *SectorBuilder) AddWorker(ctx context.Context, cfg WorkerCfg) (<-chan W
 
 	workerDir := filepath.Join(sb.filesystem.path, "workers", cfg.IPAddress)
 
-	umountCmd := exec.CommandContext(ctx, "umount", "-f", workerDir)
-	umountRes, err := umountCmd.Output()
-	log.Infof("Executed umount worker directory: %s, err: %s", umountRes, err)
+	// Check whether cache dir exists; so you should ensure clean worker dir when unmounted
+	st, err := os.Stat(filepath.Join(workerDir, string(dataCache)))
+	if err != nil || !st.IsDir() {
+		umountCmd := exec.CommandContext(ctx, "umount", "-f", workerDir)
+		umountRes, err := umountCmd.Output()
+		log.Infof("Executed umount worker directory: %s, err: %s", umountRes, err)
 
-	err = os.MkdirAll(workerDir, 0777)
-	if err != nil {
-		return nil, err
-	}
-	// You should install `sshfs`
-	mountCmd := exec.CommandContext(ctx, "sshfs", cfg.IPAddress+":"+cfg.Directory, workerDir)
-	mountRes, err := mountCmd.Output()
-	if err != nil {
-		log.Errorf("Executed sshfs mount worker directory: %s, err: %s", mountRes, err)
-		return nil, err
+		err = os.MkdirAll(workerDir, 0777)
+		if err != nil {
+			return nil, err
+		}
+		// You should install `sshfs`
+		mountCmd := exec.Command("sshfs", cfg.IPAddress+":"+cfg.Directory, workerDir)
+		mountCmd.SysProcAttr = &syscall.SysProcAttr{
+			Setpgid: true,
+		}
+		mountRes, err := mountCmd.Output()
+		if err != nil {
+			log.Errorf("Executed sshfs mount worker directory: %s, err: %s", mountRes, err)
+			return nil, err
+		}
 	}
 
 	taskCh := make(chan WorkerTask)
