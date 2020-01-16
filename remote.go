@@ -42,7 +42,10 @@ func (sb *SectorBuilder) AddWorker(ctx context.Context, cfg WorkerCfg) (<-chan W
 	sb.remoteLk.Lock()
 	defer sb.remoteLk.Unlock()
 
-	workerDir := filepath.Join(sb.filesystem.path, "workers", cfg.IPAddress)
+	workerDir, err := sb.GetPath(string(dataWorkers), cfg.IPAddress)
+	if err != nil {
+		return nil, err
+	}
 
 	// Check whether cache dir exists; so you should ensure clean worker dir when unmounted
 	st, err := os.Stat(filepath.Join(workerDir, string(dataCache)))
@@ -184,6 +187,8 @@ func (sb *SectorBuilder) doTask(ctx context.Context, r *remote, task workerCall)
 
 	case <-ctx.Done():
 		log.Warnf("context expired while waiting for task %d (sector %d): %s", task.task.TaskID, task.task.SectorID, ctx.Err())
+		err := xerrors.Errorf("context expired: %s", ctx.Err())
+		task.ret <- SealRes{Err: err.Error(), GoErr: err}
 		return
 	case <-sb.stopping:
 		return

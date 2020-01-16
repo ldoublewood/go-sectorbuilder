@@ -16,6 +16,7 @@ const (
 	dataStaging  dataType = "staging"
 	dataSealed   dataType = "sealed"
 	dataUnsealed dataType = "unsealed"
+	dataWorkers  dataType = "workers"
 )
 
 var overheadMul = map[dataType]uint64{ // * sectorSize
@@ -23,6 +24,7 @@ var overheadMul = map[dataType]uint64{ // * sectorSize
 	dataStaging:  1,
 	dataSealed:   1,
 	dataUnsealed: 1,
+	dataWorkers:  1,
 }
 
 type fs struct {
