@@ -265,7 +265,7 @@ func (sb *SectorBuilder) SealPreCommit(ctx context.Context, sectorID uint64, tic
 			SealTicket: ticket,
 			Pieces:     pieces,
 		},
-		ret: make(chan SealRes),
+		ret: make(chan SealRes, 1),
 	}
 
 	atomic.AddInt32(&sb.preCommitWait, 1)
@@ -410,7 +410,7 @@ func (sb *SectorBuilder) SealCommit(ctx context.Context, sectorID uint64, ticket
 			SealSeed: seed,
 			Rspco:    rspco,
 		},
-		ret: make(chan SealRes),
+		ret: make(chan SealRes, 1),
 	}
 
 	atomic.AddInt32(&sb.commitWait, 1)
