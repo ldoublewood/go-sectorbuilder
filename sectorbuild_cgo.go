@@ -136,7 +136,7 @@ func (sb *SectorBuilder) ReadPieceFromSealedSector(sectorID uint64, offset uint6
 }
 
 func (sb *SectorBuilder) SealPreCommit(ctx context.Context, sectorID uint64, ticket SealTicket, pieces []PublicPieceInfo) (RawSealPreCommitOutput, error) {
-	fs := sb.filesystem
+//	fs := sb.filesystem
 
 	cacheDir, err := sb.sectorCacheDir(sectorID)
 	if err != nil {
@@ -173,7 +173,7 @@ func (sb *SectorBuilder) SealPreCommit(ctx context.Context, sectorID uint64, tic
 			return RawSealPreCommitOutput{}, xerrors.Errorf("removing sealed sector %s: %w", sealedPath, err)
 		}
 	}
-
+/*
 	if err := fs.reserve(dataCache, sb.ssize); err != nil {
 		return RawSealPreCommitOutput{}, err
 	}
@@ -183,7 +183,7 @@ func (sb *SectorBuilder) SealPreCommit(ctx context.Context, sectorID uint64, tic
 		return RawSealPreCommitOutput{}, err
 	}
 	defer fs.free(dataSealed, sb.ssize)
-
+*/
 	call := workerCall{
 		task: WorkerTask{
 			Type:       WorkerPreCommit,
@@ -243,7 +243,7 @@ func (sb *SectorBuilder) SealPreCommit(ctx context.Context, sectorID uint64, tic
 		return RawSealPreCommitOutput{}, xerrors.Errorf("aggregated piece sizes don't match sector size: %d != %d (%d)", sum, ussize, int64(ussize-sum))
 	}
 
-	stagedPath := sb.StagedSectorPath(sectorID)
+	stagedPath := sb.stagedSectorPathOverride(sectorID)
 
 	// TODO: context cancellation respect
 	rspco, err := ffi.SealPreCommit(
@@ -297,7 +297,7 @@ func (sb *SectorBuilder) sealCommitLocal(sectorID uint64, ticket SealTicket, see
 	return proof, nil
 }
 
-func (sb *SectorBuilder) SealCommit(ctx context.Context, sectorID uint64, ticket SealTicket, seed SealSeed, pieces []PublicPieceInfo, rspco RawSealPreCommitOutput) (proof []byte, err error) {
+func (sb *SectorBuilder) SealCommit(ctx context.Context, sectorID uint64, ticket SealTicket, seed SealSeed, pieces []PublicPieceInfo, rspco RawSealPreCommitOutput) (proof []byte, workerDir string, err error) {
 	call := workerCall{
 		task: WorkerTask{
 			Type:       WorkerCommit,
@@ -315,7 +315,7 @@ func (sb *SectorBuilder) SealCommit(ctx context.Context, sectorID uint64, ticket
 	atomic.AddInt32(&sb.commitWait, 1)
 
 	select { // prefer remote
-	case sb.commitTasks <- call:
+	case sb.putCommitTask(&call) <- call:
 		proof, err = sb.sealCommitRemote(call)
 	default:
 		sb.checkRateLimit()
@@ -331,14 +331,14 @@ func (sb *SectorBuilder) SealCommit(ctx context.Context, sectorID uint64, ticket
 		case rl <- struct{}{}:
 			proof, err = sb.sealCommitLocal(sectorID, ticket, seed, pieces, rspco)
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, "", ctx.Err()
 		}
 	}
 	if err != nil {
-		return nil, xerrors.Errorf("commit: %w", err)
+		return nil, "",xerrors.Errorf("commit: %w", err)
 	}
 
-	return proof, nil
+	return proof, call.workerDir, nil
 }
 
 func (sb *SectorBuilder) ComputeElectionPoSt(sectorInfo SortedPublicSectorInfo, challengeSeed []byte, winners []EPostCandidate) ([]byte, error) {

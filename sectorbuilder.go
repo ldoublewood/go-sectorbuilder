@@ -239,11 +239,11 @@ func (sb *SectorBuilder) sealPreCommitRemote(call workerCall) (RawSealPreCommitO
 		return RawSealPreCommitOutput{}, xerrors.New("sectorbuilder stopped")
 	}
 }
-
+/*
 <<<<<<< HEAD
 =======
 func (sb *SectorBuilder) SealPreCommit(ctx context.Context, sectorID uint64, ticket SealTicket, pieces []PublicPieceInfo) (RawSealPreCommitOutput, error) {
-	/*
+	/{
 	fs := sb.filesystem
 
 	if err := fs.reserve(dataCache, sb.ssize); err != nil {
@@ -255,7 +255,7 @@ func (sb *SectorBuilder) SealPreCommit(ctx context.Context, sectorID uint64, tic
 		return RawSealPreCommitOutput{}, err
 	}
 	defer fs.free(dataSealed, sb.ssize)
-	*/
+	}/
 
 	call := workerCall{
 		task: WorkerTask{
@@ -348,6 +348,7 @@ func (sb *SectorBuilder) SealPreCommit(ctx context.Context, sectorID uint64, tic
 }
 
 >>>>>>> Add fixed staged sector path from env
+*/
 func (sb *SectorBuilder) sealCommitRemote(call workerCall) (proof []byte, err error) {
 	atomic.AddInt32(&sb.commitWait, -1)
 
